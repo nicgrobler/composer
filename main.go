@@ -268,8 +268,7 @@ func main() {
 		Create the service config specific for this network
 	*/
 	for _, network := range networks {
-		//numberOfNodes := len(nodes)
-		numberOfNodes := 3
+		numberOfNodes := len(nodes)
 		s := getServiceDefinition(cli, uint64(numberOfNodes), network, configs)
 		worklist = append(worklist, s)
 	}
