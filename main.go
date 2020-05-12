@@ -152,7 +152,7 @@ func getNodeList(avoidMasters int) []string {
 	return nodes
 }
 
-func setAndGetContainerEnv(containerEnv envs, network string) []string {
+func setAndGetContainerEnv(containerEnv envs, network string) env {
 	/*
 		main helper that takes the supplied .env file, as would be used by a single stack
 		and transforms it to use the following logic:
@@ -177,43 +177,49 @@ func setAndGetContainerEnv(containerEnv envs, network string) []string {
 	// create new service spec name
 	containerEnv[network]["SERVICE_SPEC_NAME"] = kv{key: "SERVICE_SPEC_NAME", value: newServiceSpecName}
 
+	cv := containerEnv[network]
+	return cv
+
+}
+
+func (containerEnv env) getContainerEnv() []string {
 	var newContainerEnv []string
-	for _, v := range containerEnv[network] {
+	for _, v := range containerEnv {
 		newContainerEnv = append(newContainerEnv, v.key+"="+v.value)
 	}
 
 	return newContainerEnv
 }
 
-func getServiceName(containerEnv envs, network string) string {
-	return containerEnv[network]["SERVICE_NAME"].value
+func (containerEnv env) getServiceName() string {
+	return containerEnv["SERVICE_NAME"].value
 }
 
-func getServiceSpecName(containerEnv envs, network string) string {
-	return containerEnv[network]["SERVICE_SPEC_NAME"].value
+func (containerEnv env) getServiceSpecName() string {
+	return containerEnv["SERVICE_SPEC_NAME"].value
 }
 
-func getStackName(containerEnv envs, network string) string {
-	return containerEnv[network]["STACK_NAME"].value
+func (containerEnv env) getStackName() string {
+	return containerEnv["STACK_NAME"].value
 }
 
-func getImage(containerEnv envs, network string) string {
-	return containerEnv[network]["IMAGE"].value
+func (containerEnv env) getImage() string {
+	return containerEnv["IMAGE"].value
 }
 
 func getServiceDefinition(cli *client.Client, replicas uint64, network string, cfg envs) swarm.ServiceSpec {
-	containerEnv := setAndGetContainerEnv(cfg, network)
+	e := setAndGetContainerEnv(cfg, network)
 	// container specs
-	container := swarm.ContainerSpec{Image: getImage(cfg, network), Command: []string{"/go/bin/pinger"}, Env: containerEnv}
+	container := swarm.ContainerSpec{Image: e.getImage(), Command: []string{"/go/bin/pinger"}, Env: e.getContainerEnv()}
 	// task specs - replica count
 	reps := swarm.ServiceMode{Replicated: &swarm.ReplicatedService{Replicas: &replicas}}
 	// network to attach to
-	nets := swarm.NetworkAttachmentConfig{Target: network, Aliases: []string{getServiceName(cfg, network)}}
+	nets := swarm.NetworkAttachmentConfig{Target: network, Aliases: []string{e.getServiceName()}}
 	serviceSpec := swarm.ServiceSpec{TaskTemplate: swarm.TaskSpec{ContainerSpec: container, Networks: []swarm.NetworkAttachmentConfig{nets}}, Mode: reps}
-	serviceSpec.Name = getServiceSpecName(cfg, network)
+	serviceSpec.Name = e.getServiceSpecName()
 	serviceSpec.Labels = map[string]string{
-		"com.docker.stack.image":     getImage(cfg, network),
-		"com.docker.stack.namespace": getStackName(cfg, network),
+		"com.docker.stack.image":     e.getImage(),
+		"com.docker.stack.namespace": e.getStackName(),
 	}
 
 	return serviceSpec
