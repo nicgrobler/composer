@@ -27,6 +27,7 @@ type envs map[string]env
 type config struct {
 	AvoidNetworks map[string]string
 	AvoidMasters  int
+	PnPn          int
 }
 
 func getKeyValue(data string) (string, string) {
@@ -83,6 +84,18 @@ func getConfig(containerEnv env) (config, error) {
 	} else {
 		// not specified, so set to default
 		cconfig.AvoidMasters = 1
+	}
+
+	replicaCount := containerEnv["PNPN"]
+	if replicaCount.value != "" {
+		s, err := strconv.Atoi(replicaCount.value)
+		if err != nil {
+			return cconfig, errors.New("invalid value passed for PNPN: " + err.Error())
+		}
+		cconfig.PnPn = s
+	} else {
+		// not specified, so set to default
+		cconfig.PnPn = 1
 	}
 
 	return cconfig, nil
@@ -164,21 +177,27 @@ func setAndGetContainerEnv(containerEnv envs, network string) env {
 		this allows us to scale the same service to multiple networks
 	*/
 
-	// create new values
-	stackValue := containerEnv[network]["STACK_NAME"].value
-	serviceValue := containerEnv[network]["SERVICE_NAME"].value
+	// create and load new, deepcopy of env
+	newEnv := make(map[string]kv)
 
-	stackKey := containerEnv[network]["STACK_NAME"].key
+	for k, v := range containerEnv[network] {
+		newEnv[k] = v
+	}
+
+	// create new values
+	stackValue := newEnv["STACK_NAME"].value
+	serviceValue := newEnv["SERVICE_NAME"].value
+
+	stackKey := newEnv["STACK_NAME"].key
 
 	newStackName := stackValue + "_" + network
 	newServiceSpecName := newStackName + "_" + serviceValue
 	// replace old stackname entry
-	containerEnv[network]["STACK_NAME"] = kv{key: stackKey, value: newStackName}
+	newEnv["STACK_NAME"] = kv{key: stackKey, value: newStackName}
 	// create new service spec name
-	containerEnv[network]["SERVICE_SPEC_NAME"] = kv{key: "SERVICE_SPEC_NAME", value: newServiceSpecName}
+	newEnv["SERVICE_SPEC_NAME"] = kv{key: "SERVICE_SPEC_NAME", value: newServiceSpecName}
 
-	cv := containerEnv[network]
-	return cv
+	return newEnv
 
 }
 
@@ -244,8 +263,14 @@ func main() {
 
 	// get network list
 	nodes := getNodeList(c.AvoidMasters)
-	if len(nodes) == 0 {
-		log.Fatalln("no useable nodes found")
+	if len(nodes) <= 1 {
+		if c.PnPn <= 1 {
+			// is pointless deploying a single container into a network on a single node...it will, by definition have NO peers to poll
+			log.Fatalln("no useable nodes found")
+		}
+	} else {
+		// as we have multiple nodes, ensure PNPN is set to 1
+		c.PnPn = 1
 	}
 
 	// build the workslist
@@ -269,7 +294,7 @@ func main() {
 	*/
 	for _, network := range networks {
 		numberOfNodes := len(nodes)
-		s := getServiceDefinition(cli, uint64(numberOfNodes), network, configs)
+		s := getServiceDefinition(cli, uint64(numberOfNodes*c.PnPn), network, configs)
 		worklist = append(worklist, s)
 	}
 
